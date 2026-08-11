@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lateral Movement Detection — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<style>
+  :root {
+    --bg: #0F1826;
+    --panel: #16233A;
+    --panel-alt: #1B2A44;
+    --hairline: #24354F;
+    --text: #E8EEF5;
+    --muted: #7E93AC;
+    --risk-normal: #3DDC97;
+    --risk-medium: #F5A623;
+    --risk-high: #FF5D5D;
+    --accent: #5B8DEF;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(ellipse 900px 600px at 30% 15%, rgba(91,141,239,0.08), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 85% 85%, rgba(61,220,151,0.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  #app {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    background: linear-gradient(180deg, var(--panel), rgba(22,35,58,0.92));
+    box-shadow: 0 1px 0 var(--hairline), 0 8px 24px -12px rgba(0,0,0,0.6);
+    position: relative;
+    z-index: 5;
+  }
+
+  .header-title { display: flex; align-items: center; gap: 12px; }
+
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--risk-normal);
+    box-shadow: 0 0 0 0 rgba(61,220,151,0.6);
+    animation: livepulse 2s ease-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes livepulse {
+    0% { box-shadow: 0 0 0 0 rgba(61,220,151,0.55); }
+    70% { box-shadow: 0 0 0 7px rgba(61,220,151,0); }
+    100% { box-shadow: 0 0 0 0 rgba(61,220,151,0); }
+  }
+
+  header h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 0;
+    color: var(--text);
+  }
+  header h1 span { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  .stat-chips { display: flex; gap: 10px; }
+  .chip {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 13px;
+    border-radius: 20px;
+    border: 1px solid var(--hairline);
+    background: rgba(255,255,255,0.02);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .chip:hover { transform: translateY(-1px); }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .chip.high { border-color: rgba(255,93,93,0.35); }
+  .chip.high .dot { background: var(--risk-high); box-shadow: 0 0 8px var(--risk-high); }
+  .chip.medium { border-color: rgba(245,166,35,0.35); }
+  .chip.medium .dot { background: var(--risk-medium); box-shadow: 0 0 8px var(--risk-medium); }
+  .chip.normal { border-color: rgba(61,220,151,0.35); }
+  .chip.normal .dot { background: var(--risk-normal); box-shadow: 0 0 8px var(--risk-normal); }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    min-height: 0;
+  }
+
+  #graph-panel {
+    position: relative;
+    border-right: 1px solid var(--hairline);
+    overflow: hidden;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  #graph-panel svg { width: 100%; height: 100%; display: block; }
+
+  .radar-ring {
+    fill: none;
+    stroke: var(--hairline);
+    stroke-width: 1;
+    opacity: 0.45;
+  }
+
+  .radar-sweep-wedge { opacity: 0.55; }
+
+  .link {
+    stroke: #3A4D6B;
+    stroke-opacity: 0.55;
+  }
+  .link.dimmed { stroke-opacity: 0.06; }
+  .link.highlighted {
+    stroke: #F5A623;
+    stroke-opacity: 0.95;
+    stroke-width: 2.4;
+    stroke-dasharray: 5 4;
+    animation: flow 0.6s linear infinite;
+  }
+  @keyframes flow { to { stroke-dashoffset: -18; } }
+
+  .node circle.node-core {
+    stroke: var(--bg);
+    stroke-width: 1.5px;
+    transition: r 0.15s ease;
+    cursor: pointer;
+  }
+  .node circle.node-halo {
+    pointer-events: none;
+    opacity: 0.35;
+  }
+  .node.dimmed { opacity: 0.12; }
+  .node text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    fill: var(--muted);
+    pointer-events: none;
+  }
+  .node:hover circle.node-core { r: 8; }
+
+  .node.risk-high circle.node-core { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { filter: drop-shadow(0 0 1px var(--risk-high)); }
+    50% { filter: drop-shadow(0 0 9px var(--risk-high)); }
+  }
+
+  #tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(19,29,48,0.96);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 8px 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.7);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    z-index: 10;
+    max-width: 220px;
+  }
+  #tooltip .t-host { font-weight: 700; margin-bottom: 3px; }
+  #tooltip .t-risk { color: var(--muted); }
+
+  #sidebar {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: linear-gradient(180deg, var(--panel), rgba(22,35,58,0.97));
+  }
+
+  #sidebar h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+    padding: 16px 18px 10px;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  #incident-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .incident-row {
+    position: relative;
+    padding: 12px 18px 12px 22px;
+    border-bottom: 1px solid var(--hairline);
+    cursor: pointer;
+    transition: background 0.15s ease, padding-left 0.15s ease;
+    animation: rowIn 0.35s ease backwards;
+  }
+  @keyframes rowIn { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: translateX(0); } }
+  .incident-row::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--hairline);
+    transition: background 0.15s ease, width 0.15s ease;
+  }
+  .incident-row.tier-high::before { background: var(--risk-high); }
+  .incident-row.tier-medium::before { background: var(--risk-medium); }
+  .incident-row.tier-low::before { background: transparent; }
+  .incident-row:hover { background: var(--panel-alt); padding-left: 26px; }
+  .incident-row.selected { background: var(--panel-alt); }
+  .incident-row.selected::before { width: 4px; }
+
+  .incident-row .row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+
+  .tier-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+  }
+  .tier-badge.high { background: rgba(255,93,93,0.16); color: var(--risk-high); }
+  .tier-badge.medium { background: rgba(245,166,35,0.16); color: var(--risk-medium); }
+  .tier-badge.low { background: rgba(61,220,151,0.16); color: var(--risk-normal); }
+
+  .incident-row .path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .incident-row .meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .score-bar-track {
+    height: 3px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    margin-top: 7px;
+    overflow: hidden;
+  }
+  .score-bar-fill { height: 100%; border-radius: 2px; }
+
+  #detail-panel {
+    border-top: 1px solid var(--hairline);
+    padding: 16px 18px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-height: 42%;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.12);
+  }
+  #detail-panel .placeholder { font-style: italic; }
+  #detail-panel strong { color: var(--text); }
+  #detail-panel .narrative { margin-top: 8px; }
+  #detail-panel .action {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--hairline);
+    color: var(--text);
+  }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="header-title">
+      <span class="live-dot"></span>
+      <h1>Lateral Movement Detection <span>/ network telemetry</span></h1>
+    </div>
+    <div class="stat-chips" id="stat-chips"></div>
+  </header>
+  <main>
+    <div id="graph-panel"><svg></svg><div id="tooltip"></div></div>
+    <div id="sidebar">
+      <h2>Ranked Incidents</h2>
+      <div id="incident-list"></div>
+      <div id="detail-panel"><span class="placeholder">Select an incident to see its traversal path and evidence.</span></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const riskColorResolved = { High: '#FF5D5D', Medium: '#F5A623', Low: '#3DDC97', Normal: '#3A4D6B' };
+
+let graphData, incidentData;
+let nodeSel, linkSel;
+let selectedIncidentId = null;
+
+Promise.all([
+  fetch('/api/graph').then(r => r.json()),
+  fetch('/api/incidents').then(r => r.json())
+]).then(([graph, incidents]) => {
+  graphData = graph;
+  incidentData = incidents;
+  renderStatChips();
+  renderIncidentList();
+  renderGraph();
+});
+
+function renderStatChips() {
+  const counts = { High: 0, Medium: 0, Low: 0 };
+  incidentData.forEach(i => counts[i.severity_tier]++);
+  const el = document.getElementById('stat-chips');
+  el.innerHTML = `
+    <div class="chip high"><span class="dot"></span>${counts.High} High</div>
+    <div class="chip medium"><span class="dot"></span>${counts.Medium} Medium</div>
+    <div class="chip normal"><span class="dot"></span>${counts.Low} Low</div>
+  `;
+}
+
+function formatElapsed(seconds) {
+  const s = Math.floor(seconds);
+  const days = Math.floor(s / 86400);
+  const hrs = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return (days > 0 ? days + 'd ' : '') + `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+}
+
+function renderIncidentList() {
+  const listEl = document.getElementById('incident-list');
+  listEl.innerHTML = '';
+  const maxScore = Math.max(...incidentData.map(i => i.severity_score), 0.001);
+  incidentData.forEach((inc, idx) => {
+    const row = document.createElement('div');
+    row.className = `incident-row tier-${inc.severity_tier.toLowerCase()}`;
+    row.style.animationDelay = `${Math.min(idx * 18, 400)}ms`;
+    row.dataset.id = inc.incident_id;
+    const barColor = riskColorResolved[inc.severity_tier] || riskColorResolved.Normal;
+    const barPct = Math.max(4, (inc.severity_score / maxScore) * 100);
+    row.innerHTML = `
+      <div class="row-top">
+        <span class="tier-badge ${inc.severity_tier.toLowerCase()}">${inc.severity_tier}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)">${inc.severity_score.toFixed(2)}</span>
+      </div>
+      <div class="path">${inc.path}</div>
+      <div class="meta">${inc.num_hops} hop(s) · ${inc.duration_seconds}s · ${inc.num_novel_hops} novel</div>
+      <div class="score-bar-track"><div class="score-bar-fill" style="width:${barPct}%;background:${barColor}"></div></div>
+    `;
+    row.addEventListener('click', () => selectIncident(inc.incident_id));
+    listEl.appendChild(row);
+  });
+}
+
+function selectIncident(id) {
+    selectedIncidentId = id;
+
+    document.querySelectorAll('.incident-row').forEach(r => {
+        const isSel = Number(r.dataset.id) === id;
+        r.classList.toggle('selected', isSel);
+        if (isSel) r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+
+    const inc = incidentData.find(i => i.incident_id === id);
+
+    if (!inc) return;
+
+    if (!inc.path) return;
+
+    const pathHosts = inc.path.split(" -> ");
+
+    renderDetail(inc);
+
+    highlightPath(pathHosts);
+}
+
+function renderDetail(inc) {
+  const el = document.getElementById('detail-panel');
+  const reasons = [];
+  if (inc.num_novel_hops > 0) reasons.push(`${inc.num_novel_hops} of ${inc.num_hops} hop(s) connect hosts that had never communicated before`);
+  if (inc.duration_seconds <= 120) reasons.push(`the chain completed in ${inc.duration_seconds}s — far faster than typical human activity`);
+  if (inc.max_deviation_score >= 1.5) reasons.push(`a host on this path deviates sharply (score ${inc.max_deviation_score.toFixed(2)}) from its baseline`);
+  if (inc.max_gnn_probability >= 0.5) reasons.push(`the GNN model assigned a ${Math.round(inc.max_gnn_probability*100)}% compromise probability to a host on this path`);
+
+  const action = inc.severity_tier === 'High'
+    ? `Escalate immediately. Investigate <strong>${inc.final_host}</strong> and consider isolating involved hosts.`
+    : inc.severity_tier === 'Medium'
+      ? `Review this shift. Confirm whether this matches known maintenance activity before dismissing.`
+      : `Log for reference. No immediate action required.`;
+
+  el.innerHTML = `
+    <div><strong>${inc.path}</strong></div>
+    <div style="margin-top:6px">Window: ${formatElapsed(inc.start_time)} → ${formatElapsed(inc.end_time)}</div>
+    <div>Users: ${inc.users_involved}</div>
+    <div class="narrative">${reasons.length ? 'Flagged because ' + reasons.join('; ') + '.' : 'Flagged as a fast, structurally unusual traversal.'}</div>
+    <div class="action">${action}</div>
+  `;
+}
+
+function highlightPath(pathHosts) {
+  const pathSet = new Set(pathHosts);
+  const pathEdges = new Set();
+  for (let i = 0; i < pathHosts.length - 1; i++) {
+    pathEdges.add(pathHosts[i] + '->' + pathHosts[i+1]);
+  }
+
+  nodeSel.classed('dimmed', d => !pathSet.has(d.id));
+  linkSel
+    .classed('dimmed', d => !pathEdges.has(d.source.id + '->' + d.target.id))
+    .classed('highlighted', d => pathEdges.has(d.source.id + '->' + d.target.id));
+}
+
+function renderGraph() {
+  const panel = document.getElementById('graph-panel');
+  const width = panel.clientWidth, height = panel.clientHeight;
+  const tooltip = document.getElementById('tooltip');
+
+  const svg = d3.select('#graph-panel svg')
+    .attr('viewBox', [0, 0, width, height]);
+
+  // glow filter, reused by every node halo
+  const defs = svg.append('defs');
+  const filter = defs.append('filter').attr('id', 'glow').attr('x', '-150%').attr('y', '-150%').attr('width', '400%').attr('height', '400%');
+  filter.append('feGaussianBlur').attr('stdDeviation', 4).attr('result', 'blur');
+  filter.append('feMerge').selectAll('feMergeNode')
+    .data(['blur', 'SourceGraphic'])
+    .join('feMergeNode')
+    .attr('in', d => d);
+
+  defs.append('marker')
+    .attr('id', 'arrow')
+    .attr('viewBox', '0 -4 8 8')
+    .attr('refX', 16).attr('refY', 0)
+    .attr('markerWidth', 6).attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-4L8,0L0,4')
+    .attr('fill', '#3A4D6B');
+
+  const g = svg.append('g');
+
+  svg.call(d3.zoom().scaleExtent([0.3, 4]).on('zoom', (event) => {
+    g.attr('transform', event.transform);
+  }));
+
+  // Signature element: faint radar rings + a rotating sweep wedge,
+  // evoking a live sonar scan -- grounded in the "watching the network" concept.
+  const cx = width / 2, cy = height / 2;
+  const maxR = Math.min(width, height) * 0.46;
+  const ringGroup = g.append('g');
+  [0.25, 0.5, 0.75, 1.0].forEach(f => {
+    ringGroup.append('circle')
+      .attr('class', 'radar-ring')
+      .attr('cx', cx).attr('cy', cy).attr('r', maxR * f);
+  });
+
+  const sweepGradId = 'sweepGrad';
+  const sweepGrad = defs.append('radialGradient').attr('id', sweepGradId);
+  sweepGrad.append('stop').attr('offset', '0%').attr('stop-color', '#5B8DEF').attr('stop-opacity', 0.28);
+  sweepGrad.append('stop').attr('offset', '100%').attr('stop-color', '#5B8DEF').attr('stop-opacity', 0);
+
+  const sweepAngle = 50; // degrees width of the wedge
+  const rad = (deg) => (deg * Math.PI) / 180;
+  const wedgePath = `M${cx},${cy} L${cx + maxR * Math.cos(rad(-sweepAngle/2 - 90))},${cy + maxR * Math.sin(rad(-sweepAngle/2 - 90))} A${maxR},${maxR} 0 0,1 ${cx + maxR * Math.cos(rad(sweepAngle/2 - 90))},${cy + maxR * Math.sin(rad(sweepAngle/2 - 90))} Z`;
+  const sweep = ringGroup.append('path')
+    .attr('class', 'radar-sweep-wedge')
+    .attr('d', wedgePath)
+    .attr('fill', `url(#${sweepGradId})`)
+    .attr('transform-origin', `${cx}px ${cy}px`);
+  sweep.append('animateTransform')
+    .attr('attributeName', 'transform')
+    .attr('type', 'rotate')
+    .attr('from', `0 ${cx} ${cy}`)
+    .attr('to', `360 ${cx} ${cy}`)
+    .attr('dur', '6s')
+    .attr('repeatCount', 'indefinite');
+
+  const simulation = d3.forceSimulation(graphData.nodes)
+    .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(70).strength(0.3))
+    .force('charge', d3.forceManyBody().strength(-160))
+    .force('center', d3.forceCenter(cx, cy))
+    .force('collision', d3.forceCollide().radius(d => 6 + Math.sqrt(d.degree || 1) * 2));
+
+  linkSel = g.append('g')
+    .selectAll('line')
+    .data(graphData.links)
+    .join('line')
+    .attr('class', 'link')
+    .attr('stroke-width', d => Math.min(1 + Math.log(d.weight + 1), 3))
+    .attr('marker-end', 'url(#arrow)')
+    .style('opacity', 0);
+  linkSel.transition().duration(500).style('opacity', 1);
+
+  nodeSel = g.append('g')
+    .selectAll('g')
+    .data(graphData.nodes)
+    .join('g')
+    .attr('class', d => 'node risk-' + d.risk.toLowerCase())
+    .call(drag(simulation));
+
+  nodeSel.append('circle')
+    .attr('class', 'node-halo')
+    .attr('r', d => (5 + Math.sqrt(d.degree || 1) * 1.6) * 1.9)
+    .attr('fill', d => riskColorResolved[d.risk] || riskColorResolved.Normal)
+    .attr('filter', 'url(#glow)');
+
+  nodeSel.append('circle')
+    .attr('class', 'node-core')
+    .attr('r', d => 5 + Math.sqrt(d.degree || 1) * 1.6)
+    .attr('fill', d => riskColorResolved[d.risk] || riskColorResolved.Normal);
+
+  nodeSel.append('text')
+    .attr('dx', d => 8 + Math.sqrt(d.degree || 1) * 1.6)
+    .attr('dy', 3)
+    .text(d => d.id);
+
+  nodeSel.style('opacity', 0)
+    .transition().duration(400).delay((d, i) => Math.min(i * 8, 500)).style('opacity', 1);
+
+  nodeSel.on('click', (event, d) => {
+    const inc = incidentData.find(i => i.path.split(' -> ').includes(d.id));
+    if (inc) selectIncident(inc.incident_id);
+  });
+
+  nodeSel.on('mouseenter', (event, d) => {
+    tooltip.innerHTML = `<div class="t-host">${d.id}</div><div class="t-risk">Risk: ${d.risk} · Degree: ${d.degree}</div>`;
+    tooltip.style.opacity = 1;
+  });
+  nodeSel.on('mousemove', (event) => {
+    const rect = panel.getBoundingClientRect();
+    tooltip.style.left = (event.clientX - rect.left + 14) + 'px';
+    tooltip.style.top = (event.clientY - rect.top + 14) + 'px';
+  });
+  nodeSel.on('mouseleave', () => { tooltip.style.opacity = 0; });
+
+  simulation.on('tick', () => {
+    linkSel
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+}
+
+function drag(simulation) {
+  function dragstarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.2).restart();
+    d.fx = d.x; d.fy = d.y;
+  }
+  function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+  function dragended(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null; d.fy = null;
+  }
+  return d3.drag().on('start', dragstarted).on('drag', dragged).on('end', dragended);
+}
+</script>
+</body>
+</html>
